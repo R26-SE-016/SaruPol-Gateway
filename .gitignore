@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build Outputs (TypeScript)
+dist/
+build/
+*.tsbuildinfo
+
+# SQLite Databases & Local Storage
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+database.sqlite
+
+# Environment variables & secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+# Exception: allow example environment templates
+!.env.example
+
+# Logs & Debugging
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Testing & Coverage
+coverage/
+.nyc_output/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+[Ee]xternal[Bb]inary/
+
+# IDE & Editor specific files
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Temporary files and caches
+.cache/
+.temp/
+.tmp/
