@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   proxyYieldPredict,
+  proxyYieldGeneric,
   proxyPathologyClassify,
   proxyPathologySync,
   proxyPathologyHistory,
@@ -11,7 +12,8 @@ import {
 
 const router = Router();
 
-// ── Yield Prediction Proxies ─────────────────────────────────────────
+// ── Yield Microservice Proxies ───────────────────────────────────────
+router.use('/yield', proxyYieldGeneric);
 router.post('/predict', proxyYieldPredict);
 router.post('/predict/45day', proxyYieldPredict);
 
