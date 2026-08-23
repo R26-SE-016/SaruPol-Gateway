@@ -7,7 +7,7 @@ import https from 'https';
 const YIELD_URL = process.env.YIELD_SERVICE_URL || 'http://localhost:5000';
 const PATHOLOGY_URL = process.env.PATHOLOGY_SERVICE_URL || 'http://127.0.0.1:5001/coconut-pathology-detection/asia-south1';
 const SOIL_URL = process.env.SOIL_SERVICE_URL || 'http://localhost:5003';
-const ADVISORY_URL = process.env.ADVISORY_SERVICE_URL || 'http://localhost:5000';
+const ADVISORY_URL = process.env.ADVISORY_SERVICE_URL || 'http://localhost:5002';
 
 // ── Disease Knowledge Map ─────────────────────────────────────────────
 // Maps System B disease_class values to clinical metadata.
@@ -578,12 +578,220 @@ export const proxySoilAnalyze = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
-export const proxyAdvisoryChat = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+
+// ── Advisory Service Mock Fallback ─────────────────────────────────────
+const getMockAdvisoryAskResponse = (question: string) => {
+  const lowerQ = question.toLowerCase();
+  let answer =
+    'Welcome to the SaruPol AI Advisor! I can help you with coconut plantation management, including disease control, soil nutrients, harvesting cycles, and yield forecasts. Please describe your specific question about your palm tree or soil.';
+  if (lowerQ.includes('bud rot') || lowerQ.includes('rot')) {
+    answer =
+      'Bud Rot is a critical fungal disease caused by *Phytophthora palmivora*. **Treatment**: Cut and remove dead crown tissues, apply Bordeaux paste to cut surfaces. Spray neighboring palms with Mancozeb (4g/L) prophylactically.';
+  } else if (lowerQ.includes('fertilizer') || lowerQ.includes('nitrogen') || lowerQ.includes('fertiliz')) {
+    answer =
+      'For adult palms (8+ years), CRI recommends per palm per year: Urea 800g · Eppawala Rock Phosphate 600g · Muriate of Potash 1600g · Dolomite 1000g. Apply in split doses during the rainy season (May–June and October–November).';
+  }
+  return {
+    success: true,
+    question,
+    answer,
+    sources: [{ title: 'SaruPol General Farming Knowledge Base', content: '' }],
+    images: [],
+    zone: 'Wet Zone',
+    season: 'Maha',
+    confidence: 0.80,
+    retrieval_confidence: 0.80,
+    combined_reliability: 80,
+    reliability_level: 'Moderate',
+    context_used: null,
+    session_id: null,
+    model_used: 'mock_fallback',
+  };
+};
+
+// ── Advisory: POST /advisory/ask ──────────────────────────────────────
+// Proxies to advisory service  POST /ask  (single-LLM RAG + conversation memory)
+export const proxyAdvisoryAsk = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const result = await postToService(ADVISORY_URL, '/api/chat', req.body);
+    const result = await postToService(ADVISORY_URL, '/ask', req.body);
     res.status(200).json(result);
   } catch (err: any) {
-    console.warn(`[Proxy Warning] Advisory service connection failed: ${err.message}. Sending mock fallback data.`);
-    res.status(200).json(getMockAdvisoryResponse(req.body.message || ''));
+    console.warn(`[Advisory Proxy] /ask unreachable: ${err.message}. Sending mock fallback.`);
+    res.status(200).json(getMockAdvisoryAskResponse(req.body.question || ''));
   }
 };
+
+// ── Advisory: POST /advisory/ask-multi ───────────────────────────────
+// Proxies to advisory service  POST /ask-multi  (multi-LLM consensus + judge)
+export const proxyAdvisoryAskMulti = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const result = await postToService(ADVISORY_URL, '/ask-multi', req.body);
+    res.status(200).json(result);
+  } catch (err: any) {
+    console.warn(`[Advisory Proxy] /ask-multi unreachable: ${err.message}. Sending mock fallback.`);
+    const mockAsk = getMockAdvisoryAskResponse(req.body.question || '');
+    res.status(200).json({
+      success: true,
+      best_answer: mockAsk.answer,
+      best_model: 'mock_fallback',
+      reason: 'Advisory service is offline — mock response served.',
+      consensus_score: 0,
+      retrieval_confidence: 0.80,
+      combined_reliability: 80,
+      reliability_level: 'Moderate',
+      llama_answer: mockAsk.answer,
+      llama8b_answer: mockAsk.answer,
+      gemma_answer: null,
+      qwen_answer: null,
+      sources: mockAsk.sources,
+      images: [],
+      zone: null,
+      season: null,
+      early_exit: false,
+      similarity_score: null,
+      latency_ms: 0,
+    });
+  }
+};
+
+// ── Advisory: POST /advisory/translate-batch ─────────────────────────
+// Proxies to advisory service  POST /translate-batch
+export const proxyAdvisoryTranslateBatch = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const result = await postToService(ADVISORY_URL, '/translate-batch', req.body);
+    res.status(200).json(result);
+  } catch (err: any) {
+    console.warn(`[Advisory Proxy] /translate-batch unreachable: ${err.message}. Returning identity translations.`);
+    // Fallback: return the original texts unchanged so the UI remains functional
+    const messages: Array<{ id: string; text: string }> = req.body.messages || [];
+    res.status(200).json({
+      success: true,
+      translations: messages.map((m) => ({ id: m.id, translated_text: m.text })),
+    });
+  }
+};
+
+// ── Advisory: GET /advisory/tts ───────────────────────────────────────
+// Pipes the advisory service's StreamingResponse (audio/mpeg) directly to the client.
+// Must NOT buffer + JSON-parse — TTS is binary audio data.
+export const proxyAdvisoryTts = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const targetUrl = new URL(`${ADVISORY_URL.replace(/\/$/, '')}/tts`);
+    // Forward query params: text, lang
+    const { text, lang } = req.query as { text?: string; lang?: string };
+    if (text) targetUrl.searchParams.set('text', text);
+    if (lang) targetUrl.searchParams.set('lang', lang || 'en');
+
+    const lib = targetUrl.protocol === 'https:' ? https : http;
+    const options: http.RequestOptions = {
+      hostname: targetUrl.hostname,
+      port: targetUrl.port,
+      path: targetUrl.pathname + targetUrl.search,
+      method: 'GET',
+      timeout: 30000,
+    };
+
+    const proxyReq = lib.request(options, (proxyRes) => {
+      const status = proxyRes.statusCode || 200;
+      if (status >= 200 && status < 300) {
+        res.setHeader('Content-Type', proxyRes.headers['content-type'] || 'audio/mpeg');
+        res.setHeader('Transfer-Encoding', 'chunked');
+        res.status(status);
+        proxyRes.pipe(res, { end: true });
+      } else {
+        res.status(status).json({ error: `Advisory TTS service returned status ${status}` });
+      }
+    });
+
+    proxyReq.on('error', (err) => {
+      console.warn(`[Advisory Proxy] /tts stream error: ${err.message}`);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Advisory TTS service unreachable' });
+      }
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      if (!res.headersSent) {
+        res.status(504).json({ error: 'Advisory TTS service timed out' });
+      }
+    });
+
+    proxyReq.end();
+  } catch (err: any) {
+    console.warn(`[Advisory Proxy] /tts error: ${err.message}`);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+};
+
+// ── Advisory: POST /advisory/transcribe ──────────────────────────────
+// Pipes multipart/form-data audio file to advisory service  POST /transcribe
+// Streams the raw request body through to preserve Content-Type boundary.
+export const proxyAdvisoryTranscribe = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const targetUrl = new URL(`${ADVISORY_URL.replace(/\/$/, '')}/transcribe`);
+    const lib = targetUrl.protocol === 'https:' ? https : http;
+
+    const options: http.RequestOptions = {
+      hostname: targetUrl.hostname,
+      port: targetUrl.port,
+      path: targetUrl.pathname + targetUrl.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': req.headers['content-type'] || 'multipart/form-data',
+        ...(req.headers['content-length'] ? { 'Content-Length': req.headers['content-length'] } : {}),
+      },
+      timeout: 60000,
+    };
+
+    const proxyReq = lib.request(options, (proxyRes) => {
+      let responseData = '';
+      proxyRes.on('data', (chunk) => { responseData += chunk; });
+      proxyRes.on('end', () => {
+        try {
+          const parsed = JSON.parse(responseData);
+          res.status(proxyRes.statusCode || 200).json(parsed);
+        } catch {
+          res.status(proxyRes.statusCode || 200).send(responseData);
+        }
+      });
+    });
+
+    proxyReq.on('error', (err) => {
+      console.warn(`[Advisory Proxy] /transcribe error: ${err.message}`);
+      if (!res.headersSent) {
+        res.status(502).json({ success: false, error: 'Advisory transcription service unreachable', transcribed_text: '', detected_language: 'en', duration_ms: 0 });
+      }
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      if (!res.headersSent) {
+        res.status(504).json({ success: false, error: 'Advisory transcription service timed out', transcribed_text: '', detected_language: 'en', duration_ms: 0 });
+      }
+    });
+
+    // Pipe the raw request body (multipart audio) through to the advisory service
+    req.pipe(proxyReq, { end: true });
+  } catch (err: any) {
+    console.warn(`[Advisory Proxy] /transcribe error: ${err.message}`);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message, transcribed_text: '', detected_language: 'en', duration_ms: 0 });
+    }
+  }
+};
+
+// ── Advisory: GET /advisory/health ───────────────────────────────────
+// Proxies to advisory service  GET /health
+export const proxyAdvisoryHealth = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const result = await getFromService(ADVISORY_URL, '/health');
+    res.status(200).json(result);
+  } catch (err: any) {
+    console.warn(`[Advisory Proxy] /health unreachable: ${err.message}.`);
+    res.status(503).json({ status: 'unhealthy', rag_chain_loaded: false, retriever_loaded: false });
+  }
+};
+
