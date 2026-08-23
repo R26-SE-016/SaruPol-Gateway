@@ -4,7 +4,7 @@ import http from 'http';
 import https from 'https';
 
 // Configuration URLs from Environment
-const YIELD_URL = process.env.YIELD_SERVICE_URL || 'http://localhost:5001';
+const YIELD_URL = process.env.YIELD_SERVICE_URL || 'http://localhost:5000';
 const PATHOLOGY_URL = process.env.PATHOLOGY_SERVICE_URL || 'http://127.0.0.1:5001/coconut-pathology-detection/asia-south1';
 const SOIL_URL = process.env.SOIL_SERVICE_URL || 'http://localhost:5003';
 const ADVISORY_URL = process.env.ADVISORY_SERVICE_URL || 'http://localhost:5000';
@@ -412,6 +412,61 @@ export const proxyYieldPredict = async (req: AuthenticatedRequest, res: Response
   } catch (err: any) {
     console.warn(`[Proxy Warning] Yield service connection failed: ${err.message}. Sending mock fallback data.`);
     res.status(200).json(getMockYieldData(req.body, is45Day));
+  }
+};
+
+// ── Generic Yield Microservice Proxy (Farms, Zones, Trees, CDA Rates) ──
+export const proxyYieldGeneric = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const targetUrl = new URL(`${YIELD_URL.replace(/\/$/, '')}/api${req.path}`);
+    Object.keys(req.query).forEach((k) => {
+      targetUrl.searchParams.append(k, String(req.query[k]));
+    });
+
+    const lib = targetUrl.protocol === 'https:' ? https : http;
+    const data = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && req.body && Object.keys(req.body).length > 0 
+      ? JSON.stringify(req.body) 
+      : '';
+
+    const options: http.RequestOptions = {
+      hostname: targetUrl.hostname,
+      port: targetUrl.port,
+      path: targetUrl.pathname + targetUrl.search,
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
+      },
+      timeout: 15000,
+    };
+
+    const proxyReq = lib.request(options, (proxyRes) => {
+      let responseData = '';
+      proxyRes.on('data', (chunk) => { responseData += chunk; });
+      proxyRes.on('end', () => {
+        try {
+          const parsed = JSON.parse(responseData);
+          res.status(proxyRes.statusCode || 200).json(parsed);
+        } catch {
+          res.status(proxyRes.statusCode || 200).send(responseData);
+        }
+      });
+    });
+
+    proxyReq.on('error', (err) => {
+      console.error('[Yield Proxy Request Error]:', err.message);
+      res.status(502).json({ success: false, error: 'Yield microservice unreachable' });
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      res.status(504).json({ success: false, error: 'Yield microservice timeout' });
+    });
+
+    if (data) proxyReq.write(data);
+    proxyReq.end();
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
