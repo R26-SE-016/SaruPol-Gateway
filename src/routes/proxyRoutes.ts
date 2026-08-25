@@ -10,7 +10,12 @@ import {
   proxyCanopyHotspots,
   proxyUpdateHotspotStatus,
   proxySoilAnalyze,
-  proxyAdvisoryChat
+  proxyAdvisoryAsk,
+  proxyAdvisoryAskMulti,
+  proxyAdvisoryTranslateBatch,
+  proxyAdvisoryTts,
+  proxyAdvisoryTranscribe,
+  proxyAdvisoryHealth,
 } from '../controllers/proxyController';
 
 const router = Router();
@@ -43,8 +48,19 @@ router.post('/pathology/aerial/hotspots/:id/status', proxyUpdateHotspotStatus);
 // ── Soil Intelligence Proxies ────────────────────────────────────────
 router.post('/soil/analyze', proxySoilAnalyze);
 
-// ── Advisory Chatbot Proxy ───────────────────────────────────────────
-router.post('/advisory/chat', proxyAdvisoryChat);
+// ── Advisory Chatbot Proxies ─────────────────────────────────────────
+// POST /api/advisory/ask              — Single-LLM RAG query with conversation memory
+router.post('/advisory/ask', proxyAdvisoryAsk);
+// POST /api/advisory/ask-multi        — Multi-LLM consensus + judge query
+router.post('/advisory/ask-multi', proxyAdvisoryAskMulti);
+// POST /api/advisory/translate-batch  — Batch translate chat messages
+router.post('/advisory/translate-batch', proxyAdvisoryTranslateBatch);
+// GET  /api/advisory/tts              — Text-to-Speech audio stream (audio/mpeg)
+router.get('/advisory/tts', proxyAdvisoryTts);
+// POST /api/advisory/transcribe       — Speech-to-Text (multipart/form-data audio)
+router.post('/advisory/transcribe', proxyAdvisoryTranscribe);
+// GET  /api/advisory/health           — Advisory service health check
+router.get('/advisory/health', proxyAdvisoryHealth);
 
 export default router;
 
