@@ -81,7 +81,7 @@ const postToService = (url: string, path: string, body: any): Promise<any> => {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(data),
         },
-        timeout: 15000,
+        timeout: 120000,
       };
 
       const req = lib.request(options, (res) => {
@@ -123,7 +123,7 @@ const getFromService = (url: string, path: string): Promise<any> => {
         port: targetUrl.port,
         path: targetUrl.pathname + targetUrl.search,
         method: 'GET',
-        timeout: 15000,
+        timeout: 120000,
       };
 
       const req = lib.request(options, (res) => {
@@ -437,7 +437,7 @@ export const proxyYieldGeneric = async (req: AuthenticatedRequest, res: Response
         'Content-Type': 'application/json',
         ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
       },
-      timeout: 15000,
+      timeout: 120000,
     };
 
     const proxyReq = lib.request(options, (proxyRes) => {
