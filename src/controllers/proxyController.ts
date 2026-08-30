@@ -990,8 +990,7 @@ export const proxySoilModelTrain = async (req: AuthenticatedRequest, res: Respon
 
 export const proxySoilGeneric = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    // Maps /soil/<path> or /v1/<path> to /api/v1/<path> on SOIL_URL
-    const cleanPath = req.path.replace(/^\/(?:soil|v1)\/?/, '');
+    const cleanPath = req.path.replace(/^\/(?:soil|v1)\/?/, '').replace(/^\//, '');
     const targetPath = cleanPath ? `/api/v1/${cleanPath}` : '/api/v1';
     const targetUrl = new URL(`${SOIL_URL.replace(/\/$/, '')}${targetPath}`);
 
