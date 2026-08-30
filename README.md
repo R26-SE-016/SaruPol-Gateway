@@ -15,7 +15,7 @@
 
 ---
 
-## 📖 Overview
+##📖 Overview
 
 **SaruPol-Gateway** serves as the central communication backbone and security layer for the **SaruPol Coconut Research & Plantation Intelligence Platform**. It provides a single, high-performance REST API entry point for the **SaruPol Mobile Client (Expo/React Native APK)** and web dashboards, routing requests across four autonomous AI/ML microservices.
 

@@ -10,6 +10,16 @@ import {
   proxyCanopyHotspots,
   proxyUpdateHotspotStatus,
   proxySoilAnalyze,
+  proxySoilPredictTriangulated,
+  proxySoilGetTrees,
+  proxySoilLocationAgroZone,
+  proxySoilNutrientPredict,
+  proxySoilAnalysisStart,
+  proxySoilAnalysisReading,
+  proxySoilAnalysisComplete,
+  proxySoilModelStatus,
+  proxySoilModelTrain,
+  proxySoilGeneric,
   proxyAdvisoryAsk,
   proxyAdvisoryAskMulti,
   proxyAdvisoryTranslateBatch,
@@ -46,7 +56,35 @@ router.patch('/pathology/aerial/hotspots/:id', proxyUpdateHotspotStatus);
 router.post('/pathology/aerial/hotspots/:id/status', proxyUpdateHotspotStatus);
 
 // ── Soil Intelligence Proxies ────────────────────────────────────────
+// POST /api/soil/predict/triangulated — 3-point composite spatial ML prediction & CRI dosage
+router.post('/soil/predict/triangulated', proxySoilPredictTriangulated);
+router.post('/predict/triangulated', proxySoilPredictTriangulated);
+
+// GET /api/soil/trees — Empirical Makandura estate trees list
+router.get('/soil/trees', proxySoilGetTrees);
+router.get('/trees', proxySoilGetTrees);
+
+// POST /api/soil/location/agro-zone — NSDI GIS coordinate agro-climatic zone resolver
+router.post('/soil/location/agro-zone', proxySoilLocationAgroZone);
+router.post('/location/agro-zone', proxySoilLocationAgroZone);
+
+// POST /api/soil/nutrient-analysis/predict — Leaf deficiency visual assessment (multipart image)
+router.post('/soil/nutrient-analysis/predict', proxySoilNutrientPredict);
+router.post('/nutrient-analysis/predict', proxySoilNutrientPredict);
+
+// IoT Sampling Session Endpoints
+router.post('/soil/analysis/start', proxySoilAnalysisStart);
+router.post('/soil/analysis/reading', proxySoilAnalysisReading);
+router.post('/soil/analysis/complete', proxySoilAnalysisComplete);
+
+// Model Management
+router.get('/soil/models/status', proxySoilModelStatus);
+router.post('/soil/models/train', proxySoilModelTrain);
+
+// Legacy Soil & Generic /soil and /v1 proxies
 router.post('/soil/analyze', proxySoilAnalyze);
+router.use('/soil', proxySoilGeneric);
+router.use('/v1', proxySoilGeneric);
 
 // ── Advisory Chatbot Proxies ─────────────────────────────────────────
 // POST /api/advisory/ask              — Single-LLM RAG query with conversation memory
