@@ -1,15 +1,19 @@
 <div align="center">
 
-# 🌴 SaruPol API Gateway
+<img src="./docs/brand/logo-text.png" alt="සරුපොල් (SaruPol)" width="380" />
+<br/>
+<img src="./docs/brand/logo-icon.png" alt="SaruPol Icon" width="80" />
 
-**Unified Microservices Gateway & Reverse Proxy for the SaruPol Smart Coconut Plantation Management System**
+### 🌴 සරුපොල් (SaruPol) — API Gateway
+**Unified Microservices Gateway & Reverse Proxy for the SaruPol Smart Coconut Plantation Ecosystem**
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4.5-blue.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-20.x-green.svg?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Express](https://img.shields.io/badge/Express-4.19.2-black.svg?logo=express&logoColor=white)](https://expressjs.com/)
+[![Google Cloud Run](https://img.shields.io/badge/Google_Cloud_Run-Deployed-4285F4.svg?logo=googlecloud&logoColor=white)](https://sarupol-gateway-636168956069.asia-south1.run.app)
 [![SQLite](https://img.shields.io/badge/SQLite-3-003B57.svg?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
 [![JWT](https://img.shields.io/badge/Auth-JWT%20Bearer-orange.svg?logo=jsonwebtokens&logoColor=white)](https://jwt.io/)
-[![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)]()
+[![Status](https://img.shields.io/badge/Status-Production%20Live-brightgreen.svg)]()
 
 </div>
 
