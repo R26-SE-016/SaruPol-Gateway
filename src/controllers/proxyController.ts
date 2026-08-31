@@ -417,6 +417,7 @@ export const proxyYieldPredict = async (req: AuthenticatedRequest, res: Response
 
 // ── Generic Yield Microservice Proxy (Farms, Zones, Trees, CDA Rates) ──
 export const proxyYieldGeneric = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  console.log("[PROXY HIT] proxyYieldGeneric", req.method, req.originalUrl);
   try {
     const targetUrl = new URL(`${YIELD_URL.replace(/\/$/, '')}/api${req.path}`);
     Object.keys(req.query).forEach((k) => {
@@ -446,27 +447,27 @@ export const proxyYieldGeneric = async (req: AuthenticatedRequest, res: Response
       proxyRes.on('end', () => {
         try {
           const parsed = JSON.parse(responseData);
-          res.status(proxyRes.statusCode || 200).json(parsed);
+          if (!res.headersSent) res.status(proxyRes.statusCode || 200).json(parsed);
         } catch {
-          res.status(proxyRes.statusCode || 200).send(responseData);
+          if (!res.headersSent) res.status(proxyRes.statusCode || 200).send(responseData);
         }
       });
     });
 
     proxyReq.on('error', (err) => {
       console.error('[Yield Proxy Request Error]:', err.message);
-      res.status(502).json({ success: false, error: 'Yield microservice unreachable' });
+      if (!res.headersSent) res.status(502).json({ success: false, error: "Yield microservice unreachable" });
     });
 
     proxyReq.on('timeout', () => {
       proxyReq.destroy();
-      res.status(504).json({ success: false, error: 'Yield microservice timeout' });
+      if (!res.headersSent) res.status(504).json({ success: false, error: "Yield microservice timeout" });
     });
 
     if (data) proxyReq.write(data);
     proxyReq.end();
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
   }
 };
 
