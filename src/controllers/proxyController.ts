@@ -579,8 +579,11 @@ export const proxyAerialSpectral = async (req: AuthenticatedRequest, res: Respon
     const indexType = req.body?.index_type || 'VARI';
     const estateId = req.body?.estate_id || 'estate_001';
     
-    // Generate realistic fallback spectral analysis
+    // Generate realistic fallback spectral analysis using request GPS bounds or Makandura CRI coordinates
     const isNdvi = indexType === 'NDVI';
+    const baseLat = typeof req.body?.gps_bounds?.lat === 'number' ? req.body.gps_bounds.lat : 7.3275;
+    const baseLng = typeof req.body?.gps_bounds?.lng === 'number' ? req.body.gps_bounds.lng : 79.9880;
+
     const mockData = {
       estate_id: estateId,
       index_type: indexType,
@@ -599,7 +602,7 @@ export const proxyAerialSpectral = async (req: AuthenticatedRequest, res: Respon
       hotspots: [
         {
           id: `hotspot_${Math.random().toString(36).substring(2, 9)}`,
-          location: { lat: 7.2914, lng: 80.6342 },
+          location: { lat: Number((baseLat + 0.0012).toFixed(6)), lng: Number((baseLng + 0.0010).toFixed(6)) },
           pixel_coordinates: { x: 450, y: 320 },
           mean_index_value: isNdvi ? 0.28 : -0.08,
           severity: 'critical',
@@ -611,7 +614,7 @@ export const proxyAerialSpectral = async (req: AuthenticatedRequest, res: Respon
         },
         {
           id: `hotspot_${Math.random().toString(36).substring(2, 9)}`,
-          location: { lat: 7.2928, lng: 80.6325 },
+          location: { lat: Number((baseLat - 0.0015).toFixed(6)), lng: Number((baseLng - 0.0012).toFixed(6)) },
           pixel_coordinates: { x: 1120, y: 780 },
           mean_index_value: isNdvi ? 0.42 : 0.05,
           severity: 'high',
@@ -623,7 +626,7 @@ export const proxyAerialSpectral = async (req: AuthenticatedRequest, res: Respon
         },
         {
           id: `hotspot_${Math.random().toString(36).substring(2, 9)}`,
-          location: { lat: 7.2895, lng: 80.6358 },
+          location: { lat: Number((baseLat + 0.0008).toFixed(6)), lng: Number((baseLng - 0.0018).toFixed(6)) },
           pixel_coordinates: { x: 1480, y: 240 },
           mean_index_value: isNdvi ? 0.45 : 0.07,
           severity: 'moderate',
@@ -661,7 +664,7 @@ export const proxyCanopyHotspots = async (req: AuthenticatedRequest, res: Respon
         {
           id: 'hotspot_sector_b_01',
           estate_id: estateIdStr,
-          location: { lat: 7.2914, lng: 80.6342 },
+          location: { lat: 7.3287, lng: 79.9890 },
           severity: 'critical',
           mean_index_value: 0.28,
           radius_meters: 6.4,
@@ -672,7 +675,7 @@ export const proxyCanopyHotspots = async (req: AuthenticatedRequest, res: Respon
         {
           id: 'hotspot_sector_c_04',
           estate_id: estateIdStr,
-          location: { lat: 7.2928, lng: 80.6325 },
+          location: { lat: 7.3262, lng: 79.9868 },
           severity: 'high',
           mean_index_value: 0.42,
           radius_meters: 4.8,
