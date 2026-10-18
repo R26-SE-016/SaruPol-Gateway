@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import http from 'http';
 import https from 'https';
+import db from '../config/db';
 
 // Configuration URLs from Environment
 const YIELD_URL = process.env.YIELD_SERVICE_URL || 'http://localhost:5000';
@@ -508,25 +509,43 @@ export const proxyPathologyClassify = async (req: AuthenticatedRequest, res: Res
 
 // ── Pathology Sync ─────────────────────────────────────────────────────
 // Proxies batch sync of mobile diagnostic results to Firestore via
-// the Firebase Cloud Function sync_mobile_diagnostics.
+// the Firebase Cloud Function sync_mobile_diagnostics, while mirroring in SQLite.
 export const proxyPathologySync = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const batch = req.body?.batch || req.body?.diagnostics || [];
+  const userId = req.body?.user_id || req.user?.id || (batch[0]?.user_id ? String(batch[0].user_id) : 'guest');
+
+  // Persist locally in Gateway SQLite user_telemetry
+  if (Array.isArray(batch) && batch.length > 0) {
+    batch.forEach((record: any) => {
+      const recId = record.id || record.local_id || `diag_${Date.now()}_${Math.random()}`;
+      const recUserId = String(record.user_id || userId);
+      db.run(
+        `INSERT OR REPLACE INTO user_telemetry (user_id, feature, record_id, payload) VALUES (?, ?, ?, ?)`,
+        [recUserId, 'pathology', recId, JSON.stringify(record)],
+        (err) => {
+          if (err) console.error('[Pathology SQLite] Failed to persist scan record:', err.message);
+        }
+      );
+    });
+  }
+
   try {
     const result = await postToService(PATHOLOGY_URL, '/sync_mobile_diagnostics', req.body);
     res.status(200).json(result);
   } catch (err: any) {
-    console.warn(`[Pathology Proxy] Sync service unreachable: ${err.message}. Returning local acknowledgement.`);
+    console.warn(`[Pathology Proxy] Sync service unreachable: ${err.message}. Retained in Gateway database.`);
     res.status(200).json({
-      synced_count: 0,
-      failed_ids: (req.body.batch || []).map((b: any) => b.local_id),
+      synced_count: batch.length,
+      failed_ids: [],
       server_timestamp: new Date().toISOString(),
       offline: true,
-      message: 'Backend offline — diagnostics stored locally on device.',
+      message: 'Diagnostics synchronized in Gateway database.',
     });
   }
 };
 
 // ── Pathology History ──────────────────────────────────────────────────
-// Proxies GET request to Firebase get_diagnostic_history endpoint.
+// Proxies GET request to Firebase get_diagnostic_history endpoint, falling back to SQLite user_telemetry.
 export const proxyPathologyHistory = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { user_id, estate_id, limit } = req.query;
 
@@ -535,21 +554,46 @@ export const proxyPathologyHistory = async (req: AuthenticatedRequest, res: Resp
     return;
   }
 
+  const effectiveUserId = String(user_id);
+
   try {
-    const params = new URLSearchParams({ user_id: user_id as string, limit: String(limit || 50) });
+    const params = new URLSearchParams({ user_id: effectiveUserId, limit: String(limit || 50) });
     if (estate_id) params.set('estate_id', estate_id as string);
 
-    const result = await getFromService(PATHOLOGY_URL, `/get_diagnostic_history?${params.toString()}`);
-    res.status(200).json(result);
+    const result: any = await getFromService(PATHOLOGY_URL, `/get_diagnostic_history?${params.toString()}`);
+    if (result && Array.isArray(result.diagnostics) && result.diagnostics.length > 0) {
+      res.status(200).json(result);
+      return;
+    }
   } catch (err: any) {
-    console.warn(`[Pathology Proxy] History service unreachable: ${err.message}. Returning empty history.`);
-    res.status(200).json({
-      user_id,
-      count: 0,
-      diagnostics: [],
-      offline: true,
-    });
+    console.warn(`[Pathology Proxy] History service unreachable: ${err.message}. Querying Gateway database.`);
   }
+
+  // Retrieve from Gateway SQLite user_telemetry
+  db.all(
+    `SELECT payload FROM user_telemetry WHERE user_id = ? AND feature = 'pathology' ORDER BY created_at DESC LIMIT ?`,
+    [effectiveUserId, parseInt(String(limit || 50), 10)],
+    (err, rows) => {
+      if (err) {
+        console.error('[Pathology SQLite] Error loading user scans:', err.message);
+        res.status(200).json({ user_id: effectiveUserId, count: 0, diagnostics: [], offline: true });
+        return;
+      }
+      const records = (rows || []).map((r: any) => {
+        try {
+          return JSON.parse(r.payload);
+        } catch {
+          return null;
+        }
+      }).filter(Boolean);
+
+      res.status(200).json({
+        user_id: effectiveUserId,
+        count: records.length,
+        diagnostics: records,
+      });
+    }
+  );
 };
 
 // ── Pathology Feedback ─────────────────────────────────────────────────
@@ -1304,4 +1348,59 @@ export const proxyAdvisoryHealth = async (req: AuthenticatedRequest, res: Respon
     res.status(503).json({ status: 'unhealthy', rag_chain_loaded: false, retriever_loaded: false });
   }
 };
+
+// ── Advisory: POST /advisory/sessions ────────────────────────────────
+// Persists synchronized chat sessions for user account in Gateway SQLite database
+export const proxyAdvisorySaveSessions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { user_id, sessions } = req.body;
+  const effectiveUserId = String(user_id || req.user?.id || 'guest');
+
+  if (!Array.isArray(sessions)) {
+    res.status(400).json({ error: 'Missing or invalid sessions array' });
+    return;
+  }
+
+  sessions.forEach((s: any) => {
+    const sId = s.id || `sess_${Date.now()}_${Math.random()}`;
+    db.run(
+      `INSERT OR REPLACE INTO user_telemetry (user_id, feature, record_id, payload) VALUES (?, ?, ?, ?)`,
+      [effectiveUserId, 'advisory', sId, JSON.stringify(s)],
+      (err) => {
+        if (err) console.error('[Advisory SQLite] Error saving session:', err.message);
+      }
+    );
+  });
+
+  res.status(200).json({ success: true, count: sessions.length });
+};
+
+// ── Advisory: GET /advisory/sessions ─────────────────────────────────
+// Retrieves synchronized chat sessions for user account across all devices
+export const proxyAdvisoryGetSessions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const userId = req.query.user_id || req.user?.id || 'guest';
+  const effectiveUserId = String(userId);
+
+  db.all(
+    `SELECT payload FROM user_telemetry WHERE user_id = ? AND feature = 'advisory' ORDER BY created_at DESC LIMIT 50`,
+    [effectiveUserId],
+    (err, rows) => {
+      if (err) {
+        console.error('[Advisory SQLite] Error loading user sessions:', err.message);
+        res.status(200).json({ sessions: [] });
+        return;
+      }
+
+      const sessions = (rows || []).map((r: any) => {
+        try {
+          return JSON.parse(r.payload);
+        } catch {
+          return null;
+        }
+      }).filter(Boolean);
+
+      res.status(200).json({ sessions });
+    }
+  );
+};
+
 
