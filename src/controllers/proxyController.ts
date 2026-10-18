@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import http from 'http';
 import https from 'https';
-import db from '../config/db';
+import db, { saveTelemetryRecord, getTelemetryRecords } from '../config/db';
 
 // Configuration URLs from Environment
 const YIELD_URL = process.env.YIELD_SERVICE_URL || 'http://localhost:5000';
@@ -514,19 +514,13 @@ export const proxyPathologySync = async (req: AuthenticatedRequest, res: Respons
   const batch = req.body?.batch || req.body?.diagnostics || [];
   const userId = req.body?.user_id || req.user?.id || (batch[0]?.user_id ? String(batch[0].user_id) : 'guest');
 
-  // Persist locally in Gateway SQLite user_telemetry
+  // Persist in Firestore user_telemetry (with SQLite local fallback)
   if (Array.isArray(batch) && batch.length > 0) {
-    batch.forEach((record: any) => {
+    for (const record of batch) {
       const recId = record.id || record.local_id || `diag_${Date.now()}_${Math.random()}`;
       const recUserId = String(record.user_id || userId);
-      db.run(
-        `INSERT OR REPLACE INTO user_telemetry (user_id, feature, record_id, payload) VALUES (?, ?, ?, ?)`,
-        [recUserId, 'pathology', recId, JSON.stringify(record)],
-        (err) => {
-          if (err) console.error('[Pathology SQLite] Failed to persist scan record:', err.message);
-        }
-      );
-    });
+      await saveTelemetryRecord(recUserId, 'pathology', recId, record).catch(() => {});
+    }
   }
 
   try {
@@ -545,7 +539,7 @@ export const proxyPathologySync = async (req: AuthenticatedRequest, res: Respons
 };
 
 // ── Pathology History ──────────────────────────────────────────────────
-// Proxies GET request to Firebase get_diagnostic_history endpoint, falling back to SQLite user_telemetry.
+// Proxies GET request to Firebase get_diagnostic_history endpoint, falling back to Firestore/SQLite user_telemetry.
 export const proxyPathologyHistory = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { user_id, estate_id, limit } = req.query;
 
@@ -569,31 +563,21 @@ export const proxyPathologyHistory = async (req: AuthenticatedRequest, res: Resp
     console.warn(`[Pathology Proxy] History service unreachable: ${err.message}. Querying Gateway database.`);
   }
 
-  // Retrieve from Gateway SQLite user_telemetry
-  db.all(
-    `SELECT payload FROM user_telemetry WHERE user_id = ? AND feature = 'pathology' ORDER BY created_at DESC LIMIT ?`,
-    [effectiveUserId, parseInt(String(limit || 50), 10)],
-    (err, rows) => {
-      if (err) {
-        console.error('[Pathology SQLite] Error loading user scans:', err.message);
-        res.status(200).json({ user_id: effectiveUserId, count: 0, diagnostics: [], offline: true });
-        return;
-      }
-      const records = (rows || []).map((r: any) => {
-        try {
-          return JSON.parse(r.payload);
-        } catch {
-          return null;
-        }
-      }).filter(Boolean);
-
-      res.status(200).json({
-        user_id: effectiveUserId,
-        count: records.length,
-        diagnostics: records,
-      });
-    }
-  );
+  // Retrieve from Gateway Firestore / SQLite user_telemetry
+  try {
+    const records = await getTelemetryRecords(
+      effectiveUserId,
+      'pathology',
+      parseInt(String(limit || 50), 10)
+    );
+    res.status(200).json({
+      user_id: effectiveUserId,
+      count: records.length,
+      diagnostics: records,
+    });
+  } catch (err: any) {
+    res.status(200).json({ user_id: effectiveUserId, count: 0, diagnostics: [] });
+  }
 };
 
 // ── Pathology Feedback ─────────────────────────────────────────────────
@@ -1350,7 +1334,7 @@ export const proxyAdvisoryHealth = async (req: AuthenticatedRequest, res: Respon
 };
 
 // ── Advisory: POST /advisory/sessions ────────────────────────────────
-// Persists synchronized chat sessions for user account in Gateway SQLite database
+// Persists synchronized chat sessions for user account in Firestore (with SQLite fallback)
 export const proxyAdvisorySaveSessions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { user_id, sessions } = req.body;
   const effectiveUserId = String(user_id || req.user?.id || 'guest');
@@ -1360,16 +1344,10 @@ export const proxyAdvisorySaveSessions = async (req: AuthenticatedRequest, res: 
     return;
   }
 
-  sessions.forEach((s: any) => {
+  for (const s of sessions) {
     const sId = s.id || `sess_${Date.now()}_${Math.random()}`;
-    db.run(
-      `INSERT OR REPLACE INTO user_telemetry (user_id, feature, record_id, payload) VALUES (?, ?, ?, ?)`,
-      [effectiveUserId, 'advisory', sId, JSON.stringify(s)],
-      (err) => {
-        if (err) console.error('[Advisory SQLite] Error saving session:', err.message);
-      }
-    );
-  });
+    await saveTelemetryRecord(effectiveUserId, 'advisory', sId, s).catch(() => {});
+  }
 
   res.status(200).json({ success: true, count: sessions.length });
 };
@@ -1380,27 +1358,13 @@ export const proxyAdvisoryGetSessions = async (req: AuthenticatedRequest, res: R
   const userId = req.query.user_id || req.user?.id || 'guest';
   const effectiveUserId = String(userId);
 
-  db.all(
-    `SELECT payload FROM user_telemetry WHERE user_id = ? AND feature = 'advisory' ORDER BY created_at DESC LIMIT 50`,
-    [effectiveUserId],
-    (err, rows) => {
-      if (err) {
-        console.error('[Advisory SQLite] Error loading user sessions:', err.message);
-        res.status(200).json({ sessions: [] });
-        return;
-      }
-
-      const sessions = (rows || []).map((r: any) => {
-        try {
-          return JSON.parse(r.payload);
-        } catch {
-          return null;
-        }
-      }).filter(Boolean);
-
-      res.status(200).json({ sessions });
-    }
-  );
+  try {
+    const sessions = await getTelemetryRecords(effectiveUserId, 'advisory', 50);
+    res.status(200).json({ sessions });
+  } catch (err: any) {
+    console.error('[Advisory Telemetry] Error loading user sessions:', err.message);
+    res.status(200).json({ sessions: [] });
+  }
 };
 
 
