@@ -49,6 +49,25 @@ function initializeDatabase() {
         console.log('Sync logs table initialized.');
       }
     });
+
+    // Create persistent user_telemetry table for multi-device sync
+    db.run(`
+      CREATE TABLE IF NOT EXISTS user_telemetry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        feature TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, feature, record_id) ON CONFLICT REPLACE
+      )
+    `, (err) => {
+      if (err) {
+        console.error('Error creating user_telemetry table:', err.message);
+      } else {
+        console.log('User telemetry table initialized.');
+      }
+    });
   });
 }
 

@@ -26,6 +26,8 @@ import {
   proxyAdvisoryTts,
   proxyAdvisoryTranscribe,
   proxyAdvisoryHealth,
+  proxyAdvisorySaveSessions,
+  proxyAdvisoryGetSessions,
 } from '../controllers/proxyController';
 
 const router = Router();
@@ -99,6 +101,10 @@ router.get('/advisory/tts', proxyAdvisoryTts);
 router.post('/advisory/transcribe', proxyAdvisoryTranscribe);
 // GET  /api/advisory/health           — Advisory service health check
 router.get('/advisory/health', proxyAdvisoryHealth);
+// POST /api/advisory/sessions         — Persist user advisory chat sessions (cross-device)
+router.post('/advisory/sessions', proxyAdvisorySaveSessions);
+// GET  /api/advisory/sessions         — Retrieve user advisory chat sessions (cross-device)
+router.get('/advisory/sessions', proxyAdvisoryGetSessions);
 
 export default router;
 
