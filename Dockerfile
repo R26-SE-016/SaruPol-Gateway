@@ -8,6 +8,9 @@ RUN npm ci
 COPY src ./src
 RUN npm run build
 
+# Retain only production dependencies
+RUN npm prune --omit=dev
+
 FROM node:20-slim AS runner
 
 WORKDIR /app
@@ -15,10 +18,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8000
 
-COPY package*.json ./
-RUN npm ci --only=production
-
+# Copy production node_modules and compiled output from builder
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+COPY package*.json ./
 
 EXPOSE 8000
 

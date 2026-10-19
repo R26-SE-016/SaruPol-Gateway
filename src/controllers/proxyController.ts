@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import http from 'http';
 import https from 'https';
-import db, { saveTelemetryRecord, getTelemetryRecords } from '../config/db';
+import { saveTelemetryRecord, getTelemetryRecords } from '../config/db';
 
 // Configuration URLs from Environment
 const YIELD_URL = process.env.YIELD_SERVICE_URL || 'http://localhost:5000';

@@ -1,6 +1,4 @@
 import { Firestore } from '@google-cloud/firestore';
-import sqlite3 from 'sqlite3';
-import path from 'path';
 
 // ── Google Cloud Firestore Initialization ─────────────────────────────
 const PROJECT_ID = process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || 'saru-pol';
@@ -13,50 +11,21 @@ try {
   });
   console.log(`[Firestore] Connected to Google Cloud Firestore (Project: ${PROJECT_ID})`);
 } catch (e: any) {
-  console.warn(`[Firestore] Initialisation warning: ${e.message}. Using SQLite fallback.`);
+  console.warn(`[Firestore] Initialisation warning: ${e.message}. Using in-memory fallback.`);
 }
 
-// ── SQLite Fallback Datastore ──────────────────────────────────────────
-const dbPath = path.resolve(__dirname, '../../database.sqlite');
-const sqliteDb = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error connecting to SQLite database:', err.message);
-  } else {
-    initializeSqlite();
-  }
-});
+// ── In-Memory Datastore Fallback (Zero Native Dependencies) ─────────────
+// Used for local offline development when Google Cloud credentials are unavailable
+const inMemoryUsers = new Map<string, UserRecord>();
+const inMemoryTelemetry: Array<{
+  userId: string;
+  feature: 'pathology' | 'advisory' | 'soil';
+  recordId: string;
+  payload: any;
+  createdAt: string;
+}> = [];
 
-function initializeSqlite() {
-  sqliteDb.serialize(() => {
-    sqliteDb.run(`
-      CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        role TEXT DEFAULT 'user',
-        estate_id TEXT,
-        phone TEXT,
-        district TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    sqliteDb.run(`
-      CREATE TABLE IF NOT EXISTS user_telemetry (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        feature TEXT NOT NULL,
-        record_id TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id, feature, record_id) ON CONFLICT REPLACE
-      )
-    `);
-  });
-}
-
-// ── User Management Abstractions (Firestore with SQLite Fallback) ───────
+// ── User Management Abstractions (Firestore with In-Memory Fallback) ───
 
 export interface UserRecord {
   id: string;
@@ -97,32 +66,19 @@ export async function findUserByEmail(email: string): Promise<UserRecord | null>
           created_at: data.created_at || new Date().toISOString(),
         };
       }
+      return null;
     } catch (e: any) {
-      console.warn(`[Firestore] findUserByEmail failed (${e.message}), querying SQLite.`);
+      console.warn(`[Firestore] findUserByEmail failed (${e.message}), querying local cache.`);
     }
   }
 
-  // 2. Fallback to SQLite
-  return new Promise((resolve) => {
-    sqliteDb.get(
-      `SELECT * FROM users WHERE LOWER(email) = ?`,
-      [cleanEmail],
-      (err, row: any) => {
-        if (err || !row) return resolve(null);
-        resolve({
-          id: String(row.id),
-          name: row.name,
-          email: row.email,
-          password: row.password,
-          role: row.role || 'user',
-          estate_id: row.estate_id,
-          phone: row.phone,
-          district: row.district,
-          created_at: row.created_at,
-        });
-      }
-    );
-  });
+  // 2. Fallback to In-Memory Store
+  for (const user of inMemoryUsers.values()) {
+    if (user.email.toLowerCase() === cleanEmail) {
+      return { ...user };
+    }
+  }
+  return null;
 }
 
 export async function findUserById(id: string): Promise<UserRecord | null> {
@@ -145,31 +101,15 @@ export async function findUserById(id: string): Promise<UserRecord | null> {
           created_at: data.created_at || new Date().toISOString(),
         };
       }
+      return null;
     } catch (e: any) {
-      console.warn(`[Firestore] findUserById failed (${e.message}), querying SQLite.`);
+      console.warn(`[Firestore] findUserById failed (${e.message}), querying local cache.`);
     }
   }
 
-  // 2. Fallback to SQLite
-  return new Promise((resolve) => {
-    sqliteDb.get(
-      `SELECT id, name, email, role, estate_id, phone, district, created_at FROM users WHERE id = ?`,
-      [cleanId],
-      (err, row: any) => {
-        if (err || !row) return resolve(null);
-        resolve({
-          id: String(row.id),
-          name: row.name,
-          email: row.email,
-          role: row.role || 'user',
-          estate_id: row.estate_id,
-          phone: row.phone,
-          district: row.district,
-          created_at: row.created_at,
-        });
-      }
-    );
-  });
+  // 2. Fallback to In-Memory Store
+  const user = inMemoryUsers.get(cleanId);
+  return user ? { ...user } : null;
 }
 
 export async function createUser(data: {
@@ -213,25 +153,12 @@ export async function createUser(data: {
       });
       console.log(`[Firestore] User created successfully: ${userRecord.email} (${id})`);
     } catch (e: any) {
-      console.warn(`[Firestore] createUser failed (${e.message}), persisting to SQLite.`);
+      console.warn(`[Firestore] createUser failed (${e.message}), retaining in local memory.`);
     }
   }
 
-  // 2. Also persist to SQLite (for local caching & fallback)
-  sqliteDb.run(
-    `INSERT OR REPLACE INTO users (id, name, email, password, role, estate_id, phone, district, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      userRecord.name,
-      userRecord.email,
-      userRecord.password,
-      userRecord.role,
-      userRecord.estate_id || null,
-      userRecord.phone || null,
-      userRecord.district || null,
-      now,
-    ]
-  );
+  // 2. Cache in In-Memory Store
+  inMemoryUsers.set(id, userRecord);
 
   return userRecord;
 }
@@ -263,14 +190,15 @@ export async function saveTelemetryRecord(
     }
   }
 
-  // 2. Also persist to SQLite
-  sqliteDb.run(
-    `INSERT OR REPLACE INTO user_telemetry (user_id, feature, record_id, payload) VALUES (?, ?, ?, ?)`,
-    [cleanUserId, feature, recordId, JSON.stringify(payload)],
-    (err) => {
-      if (err) console.error('[SQLite Telemetry] Insert error:', err.message);
-    }
+  // 2. Cache in In-Memory Store
+  const existingIdx = inMemoryTelemetry.findIndex(
+    (t) => t.userId === cleanUserId && t.feature === feature && t.recordId === recordId
   );
+  if (existingIdx >= 0) {
+    inMemoryTelemetry[existingIdx] = { userId: cleanUserId, feature, recordId, payload, createdAt: now };
+  } else {
+    inMemoryTelemetry.push({ userId: cleanUserId, feature, recordId, payload, createdAt: now });
+  }
 }
 
 export async function getTelemetryRecords(
@@ -295,30 +223,23 @@ export async function getTelemetryRecords(
         if (records.length > 0) return records;
       }
     } catch (e: any) {
-      console.warn(`[Firestore] getTelemetryRecords failed (${e.message}), querying SQLite.`);
+      console.warn(`[Firestore] getTelemetryRecords failed (${e.message}), querying local cache.`);
     }
   }
 
-  // 2. Fallback to SQLite
-  return new Promise((resolve) => {
-    sqliteDb.all(
-      `SELECT payload FROM user_telemetry WHERE user_id = ? AND feature = ? ORDER BY created_at DESC LIMIT ?`,
-      [cleanUserId, feature, limit],
-      (err, rows) => {
-        if (err || !rows) return resolve([]);
-        const records = rows
-          .map((r: any) => {
-            try {
-              return JSON.parse(r.payload);
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean);
-        resolve(records);
-      }
-    );
-  });
+  // 2. Fallback to In-Memory Store
+  return inMemoryTelemetry
+    .filter((t) => t.userId === cleanUserId && t.feature === feature)
+    .slice(-limit)
+    .reverse()
+    .map((t) => t.payload);
 }
 
-export default sqliteDb;
+export default {
+  firestore,
+  findUserByEmail,
+  findUserById,
+  createUser,
+  saveTelemetryRecord,
+  getTelemetryRecords,
+};
