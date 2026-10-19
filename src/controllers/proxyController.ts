@@ -4,7 +4,7 @@ import http from 'http';
 import https from 'https';
 
 // Configuration URLs from Environment
-const YIELD_URL = process.env.YIELD_SERVICE_URL || 'http://localhost:5000';
+const YIELD_URL = process.env.YIELD_SERVICE_URL || 'https://sarupol-yield-prediction-system.onrender.com';
 const PATHOLOGY_URL = process.env.PATHOLOGY_SERVICE_URL || 'http://127.0.0.1:5001/coconut-pathology-detection/asia-south1';
 const SOIL_URL = process.env.SOIL_SERVICE_URL || 'http://localhost:5003';
 const ADVISORY_URL = process.env.ADVISORY_SERVICE_URL || 'http://localhost:5002';
@@ -414,7 +414,7 @@ export const proxyYieldPredict = async (req: AuthenticatedRequest, res: Response
     res.status(200).json(getMockYieldData(req.body, is45Day));
   }
 };
-
+/*
 // ── Generic Yield Microservice Proxy (Farms, Zones, Trees, CDA Rates) ──
 export const proxyYieldGeneric = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   console.log("[PROXY HIT] proxyYieldGeneric", req.method, req.originalUrl);
@@ -470,6 +470,76 @@ export const proxyYieldGeneric = async (req: AuthenticatedRequest, res: Response
     if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
   }
 };
+*/
+export const proxyYieldGeneric = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  console.log("[PROXY HIT] proxyYieldGeneric", req.method, req.originalUrl, "Target Base:", YIELD_URL);
+  try {
+    // req.path eken '/yield' thiyenawa nam eka remove karala clean subPath eka ganna
+    let subPath = req.path.startsWith('/') ? req.path : `/${req.path}`;
+    subPath = subPath.replace(/^\/yield/, ''); // '/yield/farms' unoth '/farms' karanawa
+
+    // Base URL eka clean karaganna (agatha thiyena /api saha / ain karanawa)
+    const baseUrl = YIELD_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
+    
+    // Render endpoint eka: https://sarupol-yield-prediction-system.onrender.com/api/farms
+    const targetUrl = new URL(`${baseUrl}/api${subPath}`);
+
+    Object.keys(req.query).forEach((k) => {
+      targetUrl.searchParams.append(k, String(req.query[k]));
+    });
+
+    console.log("[TARGET URL]:", targetUrl.toString()); // Me log eka terminal eken balanna puluwan
+
+    const lib = targetUrl.protocol === 'https:' ? https : http;
+    const data = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && req.body && Object.keys(req.body).length > 0 
+      ? JSON.stringify(req.body) 
+      : '';
+
+    const options: http.RequestOptions = {
+      hostname: targetUrl.hostname,
+      port: targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80),
+      path: targetUrl.pathname + targetUrl.search,
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Host': targetUrl.hostname, // Render routing walata meka aniwarayen one
+        ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
+      },
+      timeout: 180000,
+    };
+
+    const proxyReq = lib.request(options, (proxyRes) => {
+      let responseData = '';
+      proxyRes.on('data', (chunk) => { responseData += chunk; });
+      proxyRes.on('end', () => {
+        try {
+          const parsed = JSON.parse(responseData);
+          if (!res.headersSent) res.status(proxyRes.statusCode || 200).json(parsed);
+        } catch {
+          if (!res.headersSent) res.status(proxyRes.statusCode || 200).send(responseData);
+        }
+      });
+    });
+
+    proxyReq.on('error', (err) => {
+      console.error('[Yield Proxy Request Error]:', err.message);
+      if (!res.headersSent) res.status(502).json({ success: false, error: "Yield microservice unreachable", detail: err.message });
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      if (!res.headersSent) res.status(504).json({ success: false, error: "Yield microservice timeout (Cold-start delay)" });
+    });
+
+    if (data) proxyReq.write(data);
+    proxyReq.end();
+  } catch (err: any) {
+    if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+
 
 // ── Pathology Classify ────────────────────────────────────────────────
 // Accepts: { imageBase64: string, part: string, system?: string }
