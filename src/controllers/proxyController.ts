@@ -61,6 +61,13 @@ const DISEASE_KNOWLEDGE: Record<string, {
     cultural: 'Maintain current cultural practices. Continue regular monitoring every 2–4 weeks.',
     preventive: 'Maintain optimal NPK fertilization schedule as per CRI recommendations. Ensure good drainage.',
   },
+  'undetected': {
+    displayName: 'Non-Coconut Specimen / Undetected',
+    severity: 'Healthy',
+    chemical: 'No chemical treatment applicable. The uploaded image does not exhibit coconut foliage or known pathology.',
+    cultural: 'Point the camera directly at coconut leaflets, fronds, or affected trunk sections. Ensure the specimen occupies at least 50% of the frame.',
+    preventive: 'Ensure natural daylight and keep the camera steady to prevent motion blur.',
+  },
 };
 
 // ── Helper: HTTP POST (JSON) ──────────────────────────────────────────
@@ -226,6 +233,32 @@ const postImageToService = (url: string, path: string, imageBase64: string): Pro
 // scan-result.tsx: status, diagnosis, severity, recommendations.
 const enrichPathologyResponse = (serviceResponse: any): any => {
   const diseaseClass: string = (serviceResponse.disease_class || 'healthy leaves').toLowerCase();
+
+  // If the specimen failed the botanical domain filter or entropy gate
+  if (diseaseClass === 'undetected' || serviceResponse.status === 'unrecognized' || serviceResponse.is_valid_specimen === false) {
+    const knowledge = DISEASE_KNOWLEDGE['undetected'];
+    return {
+      disease_class: 'undetected',
+      confidence: serviceResponse.confidence || 0,
+      all_predictions: serviceResponse.all_predictions || [],
+      inference_time_ms: serviceResponse.inference_time_ms || 0,
+      system: 'B',
+      part: serviceResponse.part || 'leaf',
+      status: 'unrecognized',
+      diagnosis: knowledge.displayName,
+      severity: 'Healthy',
+      message: serviceResponse.message || 'The uploaded image does not exhibit standard coconut palm foliage or known CRI pathology.',
+      is_valid_specimen: false,
+      recommendations: {
+        chemical: knowledge.chemical,
+        cultural: knowledge.cultural,
+        preventive: knowledge.preventive,
+      },
+      timestamp: new Date().toISOString(),
+      validation_metrics: serviceResponse.validation_metrics,
+    };
+  }
+
   const knowledge = DISEASE_KNOWLEDGE[diseaseClass] || DISEASE_KNOWLEDGE['healthy leaves'];
 
   return {
@@ -247,6 +280,7 @@ const enrichPathologyResponse = (serviceResponse: any): any => {
       preventive: knowledge.preventive,
     },
     timestamp: new Date().toISOString(),
+    is_valid_specimen: true,
   };
 };
 
